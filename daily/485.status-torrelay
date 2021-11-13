@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# $Id: 485.status-torrelay 842 2021-11-13 22:21:54Z rob $
+# $Id: 485.status-torrelay 843 2021-11-13 23:44:20Z rob $
 
 ########################################################################
 
@@ -122,166 +122,169 @@ case "${daily_status_torrelay_enable}" in
 
 		# PID.
 		pid=$(service tor status | sed -e 's/[^[:digit:]]//g')
-		[ -z "${pid}" ] && {
+		if [ -z "${pid}" ]; then
 			echo " Tor is not running."
-			# An exit status of >2 will always show output (see periodic(8)).
-			exit 3
-		}
-
-		# Command line arguments.
-		getargs $(procstat -h argument ${pid})
-		: ${configfile:=/usr/local/etc/tor/torrc}
-		: ${DataDirectory:=/var/db/tor}
-
-		# Resources.
-		output "Memory" "$(( $(ps -p ${pid} -o rss | tail -n +2) / 1024)) MiB"
-		output "CPU" "$(ps -p ${pid} -o %cpu | tail -n +2)%"
-
-		# Fingerprint file.
-		fpfile="${DataDirectory}/fingerprint"
-
-		if [ ! -r ${DataDirectory} ]; then
-			echo " The data directory is not readable (are you root?)."
-			rc=2
-		elif [ ! -f "${fpfile}" ]; then
-			# Fingerprint file does not exist.
-			echo " This is not a relay."
-			rc=2
+			rc=3
 		else
-			# Relay nickname and fingerprint.
-			nickname=$(cat "${fpfile}")
-			fingerprint=${nickname##* }
-			output "Relay" "${nickname}"
+			# Command line arguments.
+			getargs $(procstat -h argument ${pid})
+			: ${configfile:=/usr/local/etc/tor/torrc}
+			: ${DataDirectory:=/var/db/tor}
 
-			# Start time.
-			[ "${daily_status_torrelay_starttime}" = "YES" ] && output "Start time" "$(ps -p ${pid} -o lstart | tail -n +2)"
+			# Resources.
+			output "Memory" "$(( $(ps -p ${pid} -o rss | tail -n +2) / 1024)) MiB"
+			output "CPU" "$(ps -p ${pid} -o %cpu | tail -n +2)%"
 
-			# Control port.
-			# This may have been set on the command line,
-			# which is why we have to work around the CamelCase.
-			# ControlPort may be specified multiple times; we pick the first.
-			: ${ControlPort:=$(grep '^[[:space:]]*ControlPort[[:space:]]' "${configfile}" | cut -w -f 2)}
-			#
-			# If ControlPort is still empty, then ControlSocket may have been set.
-			: ${ControlSocket:=$(grep '^[[:space:]]*ControlSocket[[:space:]]' "${configfile}" | cut -w -f 2)}
-			[ -z "${ControlPort}" -a -n "${ControlSocket}" ] && ControlPort="unix:${ControlSocket}"
-			#
-			# If ControlPort was set to 'auto',
-			# we can only hope that the port was written to a file.
-			if [ "${ControlPort}" = "auto" ]; then
-				: ${ControlPortWriteToFile:=$(grep '^[[:space:]]*ControlPortWriteToFile[[:space:]]' "${configfile}" | cut -w -f 2)}
-				if [ -z "${ControlPortWriteToFile}" ]; then
-					echo " ControlPort is set to 'auto',"
-					echo " but the selected port is not stored in a file."
-					echo " Impossible to determine how to communicate with Tor."
-					exit 2
-				else
-					# Tor writes one or more newline terminated lines to the file
-					# in one of the formats
-					#   PORT=127.0.0.1:12345
-					#   UNIX_PORT=/path/to/socket
-					# We pick the first again.
-					ControlPort=$(grep -m 1 '^PORT=' "${ControlPortWriteToFile}" | cut -d = -f 2)
-					[ -z "${ControlPort}" ] && {
-						ControlPort=$(grep -m 1 '^UNIX_PORT=' "${ControlPortWriteToFile}" | cut -d = -f 2)
-						[ -n "${ControlPort}" ] && ControlPort="unix:${ControlPort}"
-					}
-				fi
-			fi
-			#
-			# If we still haven't found a way to communicate with Tor
-			# we may as well give up.
-			[ -z "${ControlPort}" ] && {
-				echo " Neither ControlPort nor ControlSocket seem to be set."
-				echo " Impossible to determine how to communicate with Tor."
-				exit 2
-			}
-			if [ "${ControlPort%%:*}" = "unix" ]; then
-				# If ControlPort begins with 'unix:',
-				# it's a Unix domain socket.
-				controlopt="-U"
-				controladdr=${ControlPort##unix:}
-			else
-				controladdr=${ControlPort%%:*}
-				if [ "${controladdr}" = "${ControlPort}" ]; then
-					controladdr=127.0.0.1
-					controlport=${ControlPort}
-				else
-					controlport=${ControlPort##*:}
-				fi
-			fi
-			[ "${daily_status_torrelay_ports}" = "YES" ] && output "Control port" "${controladdr}:${controlport}"
+			# Fingerprint file.
+			fpfile="${DataDirectory}/fingerprint"
 
-			# Get the rest of the info from the running Tor instance,
-			# and not from the configuration file,
-			# so that we can be sure that we're showing relevant info.
-
-			# Can has cookie?
-			cookieauth=$(grep '^[[:space:]]*CookieAuthentication[[:space:]]\+1[[:space:]]*$' "${configfile}")
-			if [ -z "${cookieauth}" ]; then
-				echo " CookieAuthentication failed."
-				echo "  Enable CookieAuthentication in ${configfile} for more detailed information."
+			if [ ! -r ${DataDirectory} ]; then
+				echo " The data directory is not readable (are you root?)."
+				rc=2
+			elif [ ! -f "${fpfile}" ]; then
+				# Fingerprint file does not exist.
+				echo " This is not a relay."
 				rc=2
 			else
-				authcookie=$(grep '^[[:space:]]*CookieAuthFile[[:space:]]' ${configfile})
-				[ -z "${authcookie}" ] && authcookie="${DataDirectory}/control_auth_cookie"
-				if [ ! -r "${authcookie}" ]; then
+				# Relay nickname and fingerprint.
+				nickname=$(cat "${fpfile}")
+				fingerprint=${nickname##* }
+				output "Relay" "${nickname}"
+
+				# Start time.
+				[ "${daily_status_torrelay_starttime}" = "YES" ] && output "Start time" "$(ps -p ${pid} -o lstart | tail -n +2)"
+
+				# Control port.
+				# This may have been set on the command line,
+				# which is why we have to work around the CamelCase.
+				# ControlPort may be specified multiple times; we pick the first.
+				: ${ControlPort:=$(grep -m 1 '^[[:space:]]*ControlPort[[:space:]]' "${configfile}" | cut -w -f 2)}
+				#
+				# If ControlPort is still empty, then ControlSocket may have been set.
+				[ -z "${ControlPort}" ] && {
+					: ${ControlSocket:=$(grep -m 1 '^[[:space:]]*ControlSocket[[:space:]]' "${configfile}" | cut -w -f 2)}
+					[ -n "${ControlSocket}" ] && ControlPort="unix:${ControlSocket}"
+				}
+				#
+				# If ControlPort was set to 'auto',
+				# we can only hope that the port was written to a file.
+				[ "${ControlPort}" = "auto" ] && {
+					: ${ControlPortWriteToFile:=$(grep -m 1 '^[[:space:]]*ControlPortWriteToFile[[:space:]]' "${configfile}" | cut -w -f 2)}
+					if [ -z "${ControlPortWriteToFile}" ]; then
+						echo " ControlPort is set to 'auto',"
+						echo " but the selected port is not stored in a file."
+						echo " Impossible to determine how to communicate with Tor."
+						exit 2
+					else
+						# Tor writes one or more newline terminated lines to the file
+						# in one of the formats
+						#   PORT=127.0.0.1:12345
+						#   UNIX_PORT=/path/to/socket
+						# We pick the first one again.
+						ControlPort=$(grep -m 1 '^PORT=' "${ControlPortWriteToFile}" | cut -d = -f 2)
+						[ -z "${ControlPort}" ] && {
+							ControlPort=$(grep -m 1 '^UNIX_PORT=' "${ControlPortWriteToFile}" | cut -d = -f 2)
+							[ -n "${ControlPort}" ] && ControlPort="unix:${ControlPort}"
+						}
+					fi
+				}
+				#
+				# If we still haven't found a way to communicate with Tor
+				# we may as well give up.
+				[ -z "${ControlPort}" ] && {
+					echo " Neither ControlPort nor ControlSocket seem to be set."
+					echo " Impossible to determine how to communicate with Tor."
+					exit 2
+				}
+				if [ "${ControlPort%%:*}" = "unix" ]; then
+					# If ControlPort begins with 'unix:',
+					# it's a Unix domain socket.
+					controlopt="-U"
+					controladdr=${ControlPort##unix:}
+					controloutput=${ControlPort}
+				else
+					controladdr=${ControlPort%%:*}
+					if [ "${controladdr}" = "${ControlPort}" ]; then
+						controladdr=127.0.0.1
+						controlport=${ControlPort}
+					else
+						controlport=${ControlPort##*:}
+					fi
+					controloutput="${controladdr}:${controlport}"
+				fi
+				[ "${daily_status_torrelay_ports}" = "YES" ] && output "Control port" "${controloutput}"
+
+				# Get the rest of the info from the running Tor instance,
+				# and not from the configuration file,
+				# so that we can be sure that we're showing relevant info.
+
+				# Can has cookie?
+				cookieauth=$(grep -m 1 '^[[:space:]]*CookieAuthentication[[:space:]]\+1[[:space:]]*$' "${configfile}")
+				if [ -z "${cookieauth}" ]; then
 					echo " CookieAuthentication failed."
-					echo "  CookieAuthFile not found or unreadable (file or directory permissions?)."
-					echo "  Correct this for more detailed information."
+					echo "  Enable CookieAuthentication in ${configfile} for more detailed information."
 					rc=2
 				else
-					# Tor control protocol:
-					#   https://gitlab.torproject.org/tpo/core/torspec/-/blob/main/control-spec.txt
+					authcookie=$(grep -m 1 '^[[:space:]]*CookieAuthFile[[:space:]]' ${configfile})
+					[ -z "${authcookie}" ] && authcookie="${DataDirectory}/control_auth_cookie"
+					if [ ! -r "${authcookie}" ]; then
+						echo " CookieAuthentication failed."
+						echo "  CookieAuthFile not found or unreadable (file or directory permissions?)."
+						echo "  Correct this for more detailed information."
+						rc=2
+					else
+						# Tor control protocol:
+						#   https://gitlab.torproject.org/tpo/core/torspec/-/blob/main/control-spec.txt
 
-					# Get hexadecimal representation of authorization cookie.
-					auth=$(hexdump -ve '/1 "%02x"' "${authcookie}")
+						# Get hexadecimal representation of authorization cookie.
+						auth=$(hexdump -ve '/1 "%02x"' "${authcookie}")
 
-					[ "${daily_status_torrelay_ports}" = "YES" ] && {
+						[ "${daily_status_torrelay_ports}" = "YES" ] && {
 
-						# SOCKSPort.
-						socksport=$( (nc ${controlopt} ${controladdr} ${controlport} <<-EOM
+							# SOCKSPort.
+							socksport=$( (nc ${controlopt} ${controladdr} ${controlport} <<-EOM
+								authenticate ${auth}
+								getinfo net/listeners/socks
+								quit
+								EOM
+								) | grep '^250-')
+							socksport=${socksport#*\"}
+							socksport=${socksport%\"*}
+							output "SOCKS port" "${socksport}"
+
+							# ORPort.
+							orport=$( (nc ${controlopt} ${controladdr} ${controlport} <<-EOM
+								authenticate ${auth}
+								getinfo net/listeners/or
+								quit
+								EOM
+								) | grep '^250-')
+							orport=${orport#*\"}
+							orport=${orport%\"*}
+							output "OR port" "${orport}"
+
+							# DirPort.
+							dirport=$( (nc ${controlopt} ${controladdr} ${controlport} <<-EOM
+								authenticate ${auth}
+								getinfo net/listeners/dir
+								quit
+								EOM
+								) | grep '^250-')
+							dirport=${dirport#*\"}
+							dirport=${dirport%\"*}
+							output "Dir port" "${dirport}"
+
+						}
+
+						# Flags.
+						flags=$( (nc ${controlopt} ${controladdr} ${controlport} <<-EOM
 							authenticate ${auth}
-							getinfo net/listeners/socks
+							getinfo ns/id/${fingerprint}
 							quit
 							EOM
-							) | grep '^250-')
-						socksport=${socksport#*\"}
-						socksport=${socksport%\"*}
-						output "SOCKS port" "${socksport}"
-
-						# ORPort.
-						orport=$( (nc ${controlopt} ${controladdr} ${controlport} <<-EOM
-							authenticate ${auth}
-							getinfo net/listeners/or
-							quit
-							EOM
-							) | grep '^250-')
-						orport=${orport#*\"}
-						orport=${orport%\"*}
-						output "OR port" "${orport}"
-
-						# DirPort.
-						dirport=$( (nc ${controlopt} ${controladdr} ${controlport} <<-EOM
-							authenticate ${auth}
-							getinfo net/listeners/dir
-							quit
-							EOM
-							) | grep '^250-')
-						dirport=${dirport#*\"}
-						dirport=${dirport%\"*}
-						output "Dir port" "${dirport}"
-
-					}
-
-					# Flags.
-					flags=$( (nc ${controlopt} ${controladdr} ${controlport} <<-EOM
-						authenticate ${auth}
-						getinfo ns/id/${fingerprint}
-						quit
-						EOM
-						) | grep '^s ')
-					output "Flags" "${flags##s }"
+							) | grep '^s ')
+						output "Flags" "${flags##s }"
+					fi
 				fi
 			fi
 		fi
