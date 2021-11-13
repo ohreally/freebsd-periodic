@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# $Id: 485.status-torrelay 840 2021-11-13 14:19:32Z rob $
+# $Id: 485.status-torrelay 842 2021-11-13 22:21:54Z rob $
 
 ########################################################################
 
@@ -99,6 +99,7 @@ getargs() {
 			# Even though it's not in line with the rest
 			# of the script, we'll keep the camel case
 			# to not over-complicate things.
+			# If an option is specified multiple times, we only catch the last.
 			eval "${1##--}=$2"
 			shift
 		fi
@@ -115,6 +116,9 @@ case "${daily_status_torrelay_enable}" in
 	[Yy][Ee][Ss])
 		echo
 		echo "Tor status:"
+
+		# The default exit value (see periodic(8)).
+		rc=1
 
 		# PID.
 		pid=$(service tor status | sed -e 's/[^[:digit:]]//g')
@@ -138,24 +142,73 @@ case "${daily_status_torrelay_enable}" in
 
 		if [ ! -r ${DataDirectory} ]; then
 			echo " The data directory is not readable (are you root?)."
+			rc=2
 		elif [ ! -f "${fpfile}" ]; then
+			# Fingerprint file does not exist.
 			echo " This is not a relay."
+			rc=2
 		else
-			namefp=$(cat "${fpfile}")
-			fingerprint=${namefp##* }
-
-			output "Relay" "${namefp}"
+			# Relay nickname and fingerprint.
+			nickname=$(cat "${fpfile}")
+			fingerprint=${nickname##* }
+			output "Relay" "${nickname}"
 
 			# Start time.
 			[ "${daily_status_torrelay_starttime}" = "YES" ] && output "Start time" "$(ps -p ${pid} -o lstart | tail -n +2)"
 
 			# Control port.
-			controlport=$(grep '^[[:space:]]*ControlPort[[:space:]]' "${configfile}" | awk '{print $2}')
-			controladdr=${controlport%%:*}
-			if [ "${controladdr}" = "${controlport}" ]; then
-				controladdr=127.0.0.1
+			# This may have been set on the command line,
+			# which is why we have to work around the CamelCase.
+			# ControlPort may be specified multiple times; we pick the first.
+			: ${ControlPort:=$(grep '^[[:space:]]*ControlPort[[:space:]]' "${configfile}" | cut -w -f 2)}
+			#
+			# If ControlPort is still empty, then ControlSocket may have been set.
+			: ${ControlSocket:=$(grep '^[[:space:]]*ControlSocket[[:space:]]' "${configfile}" | cut -w -f 2)}
+			[ -z "${ControlPort}" -a -n "${ControlSocket}" ] && ControlPort="unix:${ControlSocket}"
+			#
+			# If ControlPort was set to 'auto',
+			# we can only hope that the port was written to a file.
+			if [ "${ControlPort}" = "auto" ]; then
+				: ${ControlPortWriteToFile:=$(grep '^[[:space:]]*ControlPortWriteToFile[[:space:]]' "${configfile}" | cut -w -f 2)}
+				if [ -z "${ControlPortWriteToFile}" ]; then
+					echo " ControlPort is set to 'auto',"
+					echo " but the selected port is not stored in a file."
+					echo " Impossible to determine how to communicate with Tor."
+					exit 2
+				else
+					# Tor writes one or more newline terminated lines to the file
+					# in one of the formats
+					#   PORT=127.0.0.1:12345
+					#   UNIX_PORT=/path/to/socket
+					# We pick the first again.
+					ControlPort=$(grep -m 1 '^PORT=' "${ControlPortWriteToFile}" | cut -d = -f 2)
+					[ -z "${ControlPort}" ] && {
+						ControlPort=$(grep -m 1 '^UNIX_PORT=' "${ControlPortWriteToFile}" | cut -d = -f 2)
+						[ -n "${ControlPort}" ] && ControlPort="unix:${ControlPort}"
+					}
+				fi
+			fi
+			#
+			# If we still haven't found a way to communicate with Tor
+			# we may as well give up.
+			[ -z "${ControlPort}" ] && {
+				echo " Neither ControlPort nor ControlSocket seem to be set."
+				echo " Impossible to determine how to communicate with Tor."
+				exit 2
+			}
+			if [ "${ControlPort%%:*}" = "unix" ]; then
+				# If ControlPort begins with 'unix:',
+				# it's a Unix domain socket.
+				controlopt="-U"
+				controladdr=${ControlPort##unix:}
 			else
-				controlport=${controlport##*:}
+				controladdr=${ControlPort%%:*}
+				if [ "${controladdr}" = "${ControlPort}" ]; then
+					controladdr=127.0.0.1
+					controlport=${ControlPort}
+				else
+					controlport=${ControlPort##*:}
+				fi
 			fi
 			[ "${daily_status_torrelay_ports}" = "YES" ] && output "Control port" "${controladdr}:${controlport}"
 
@@ -168,6 +221,7 @@ case "${daily_status_torrelay_enable}" in
 			if [ -z "${cookieauth}" ]; then
 				echo " CookieAuthentication failed."
 				echo "  Enable CookieAuthentication in ${configfile} for more detailed information."
+				rc=2
 			else
 				authcookie=$(grep '^[[:space:]]*CookieAuthFile[[:space:]]' ${configfile})
 				[ -z "${authcookie}" ] && authcookie="${DataDirectory}/control_auth_cookie"
@@ -175,6 +229,7 @@ case "${daily_status_torrelay_enable}" in
 					echo " CookieAuthentication failed."
 					echo "  CookieAuthFile not found or unreadable (file or directory permissions?)."
 					echo "  Correct this for more detailed information."
+					rc=2
 				else
 					# Tor control protocol:
 					#   https://gitlab.torproject.org/tpo/core/torspec/-/blob/main/control-spec.txt
@@ -185,7 +240,7 @@ case "${daily_status_torrelay_enable}" in
 					[ "${daily_status_torrelay_ports}" = "YES" ] && {
 
 						# SOCKSPort.
-						socksport=$( (nc ${controladdr} ${controlport} <<-EOM
+						socksport=$( (nc ${controlopt} ${controladdr} ${controlport} <<-EOM
 							authenticate ${auth}
 							getinfo net/listeners/socks
 							quit
@@ -196,7 +251,7 @@ case "${daily_status_torrelay_enable}" in
 						output "SOCKS port" "${socksport}"
 
 						# ORPort.
-						orport=$( (nc ${controladdr} ${controlport} <<-EOM
+						orport=$( (nc ${controlopt} ${controladdr} ${controlport} <<-EOM
 							authenticate ${auth}
 							getinfo net/listeners/or
 							quit
@@ -207,7 +262,7 @@ case "${daily_status_torrelay_enable}" in
 						output "OR port" "${orport}"
 
 						# DirPort.
-						dirport=$( (nc ${controladdr} ${controlport} <<-EOM
+						dirport=$( (nc ${controlopt} ${controladdr} ${controlport} <<-EOM
 							authenticate ${auth}
 							getinfo net/listeners/dir
 							quit
@@ -220,7 +275,7 @@ case "${daily_status_torrelay_enable}" in
 					}
 
 					# Flags.
-					flags=$( (nc ${controladdr} ${controlport} <<-EOM
+					flags=$( (nc ${controlopt} ${controladdr} ${controlport} <<-EOM
 						authenticate ${auth}
 						getinfo ns/id/${fingerprint}
 						quit
@@ -230,12 +285,6 @@ case "${daily_status_torrelay_enable}" in
 				fi
 			fi
 		fi
-
-		###FIXME
-		# Be more elaborate here.
-		# Exit value should be 2 if something went wrong.
-		# See also periodic(8).
-		rc=1
 		;;
 	*)
 		rc=0
