@@ -1,0 +1,86 @@
+#!/bin/sh
+
+# $Id: 795.lastlogins 838 2021-11-05 09:11:17Z rob $
+
+########################################################################
+
+# List all logins for the past day.
+
+# Installation:
+# - Copy this script to /usr/local/etc/periodic/security/795.lastlogins
+# - Make it executable
+
+# The execution of this script is disabled per default.
+# To enable, set the following in /etc/periodic.conf:
+#
+#   security_status_last_logins_enable="YES"
+
+# On the first run, this script will complain with the following message:
+#
+#   No /var/log/last.today
+#
+# This is expected behaviour, and may be ignored.
+
+# To learn more about `periodic', see periodic(8) and periodic.conf(5).
+
+########################################################################
+
+# Copyright (c) 2021 Rob LA LAU <rob@ohreally.nl>
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met:
+#
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the
+#    distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
+
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+########################################################################
+
+# Source global configuration.
+[ -r /etc/defaults/periodic.conf ] && {
+	. /etc/defaults/periodic.conf
+	source_periodic_confs
+}
+
+# Source functions.
+. /etc/periodic/security/security.functions
+
+case "${security_status_last_logins_enable}" in
+	[Yy][Ee][Ss])
+		echo
+
+		# Compare the current `last' output with the one
+		# that was stored yesterday.
+		last | check_diff new_only last - "New logins:"
+
+		# Exit with the check_diff() exit value.
+		rc=$?
+		;;
+	*)
+		rc=0
+		;;
+esac
+
+exit ${rc}

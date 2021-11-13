@@ -1,0 +1,245 @@
+#!/bin/sh
+
+# $Id: 485.status-torrelay 840 2021-11-13 14:19:32Z rob $
+
+########################################################################
+
+# Display Tor relay status.
+
+# Installation:
+# - Copy this script to /usr/local/etc/periodic/daily/485.status-torrelay
+# - Make it executable
+
+# The execution of this script is disabled per default.
+# To enable, set the following in /etc/periodic.conf:
+#
+#   daily_status_torrelay_enable="YES"
+#
+# To include the ports where Tor is listening in the report, also set
+#
+#   daily_status_torrelay_ports="YES"
+#
+# To include the date and time when the relay was last started, set
+#
+#   daily_status_torrelay_starttime="YES"
+
+# To learn more about `periodic', see periodic(8) and periodic.conf(5).
+
+########################################################################
+
+# Copyright (c) 2021 Rob LA LAU <rob@ohreally.nl>
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met:
+#
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the
+#    distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
+
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+########################################################################
+
+###TODO
+# - heartbeat-like messages
+#   see /var/log/tor/notices.log
+# - tor exit info (if this is an exit node)
+# - support multiple instances
+
+# Source global configuration.
+[ -r /etc/defaults/periodic.conf ] && {
+	. /etc/defaults/periodic.conf
+	source_periodic_confs
+}
+
+: ${daily_status_torrelay_ports:=NO}
+: ${daily_status_torrelay_starttime:=NO}
+
+# This function receives the command line arguments
+# as listed by `procstat -h argument ${pid}'.
+getargs() {
+	# Loop through the received string.
+	while [ $# -gt 0 ]; do
+		if [ "$1" = "-f" ] ; then
+			# The -f parameter indicates the config file.
+			configfile=$2
+			shift
+		elif [ "${1%%[[:alpha:]]*}" = "--" ]; then
+			# If the first argument starts with '--',
+			# the second argument is a value of interest.
+
+			# This takes
+			#    --DataDirectory /var/db/tor
+			# and creates
+			#    DataDirectory=/var/db/tor
+			# which in turn allows the use of
+			#    ${DataDirectory}
+			# in the rest of the script.
+			# And the same for --PidFile. --RunAsDaemon, ...
+			# Even though it's not in line with the rest
+			# of the script, we'll keep the camel case
+			# to not over-complicate things.
+			eval "${1##--}=$2"
+			shift
+		fi
+		shift
+	done
+}
+
+# This function pretty-prints the information.
+output() {
+	printf " %-15s: %s\n" "${1## }" "${2## }"
+}
+
+case "${daily_status_torrelay_enable}" in
+	[Yy][Ee][Ss])
+		echo
+		echo "Tor status:"
+
+		# PID.
+		pid=$(service tor status | sed -e 's/[^[:digit:]]//g')
+		[ -z "${pid}" ] && {
+			echo " Tor is not running."
+			# An exit status of >2 will always show output (see periodic(8)).
+			exit 3
+		}
+
+		# Command line arguments.
+		getargs $(procstat -h argument ${pid})
+		: ${configfile:=/usr/local/etc/tor/torrc}
+		: ${DataDirectory:=/var/db/tor}
+
+		# Resources.
+		output "Memory" "$(( $(ps -p ${pid} -o rss | tail -n +2) / 1024)) MiB"
+		output "CPU" "$(ps -p ${pid} -o %cpu | tail -n +2)%"
+
+		# Fingerprint file.
+		fpfile="${DataDirectory}/fingerprint"
+
+		if [ ! -r ${DataDirectory} ]; then
+			echo " The data directory is not readable (are you root?)."
+		elif [ ! -f "${fpfile}" ]; then
+			echo " This is not a relay."
+		else
+			namefp=$(cat "${fpfile}")
+			fingerprint=${namefp##* }
+
+			output "Relay" "${namefp}"
+
+			# Start time.
+			[ "${daily_status_torrelay_starttime}" = "YES" ] && output "Start time" "$(ps -p ${pid} -o lstart | tail -n +2)"
+
+			# Control port.
+			controlport=$(grep '^[[:space:]]*ControlPort[[:space:]]' "${configfile}" | awk '{print $2}')
+			controladdr=${controlport%%:*}
+			if [ "${controladdr}" = "${controlport}" ]; then
+				controladdr=127.0.0.1
+			else
+				controlport=${controlport##*:}
+			fi
+			[ "${daily_status_torrelay_ports}" = "YES" ] && output "Control port" "${controladdr}:${controlport}"
+
+			# Get the rest of the info from the running Tor instance,
+			# and not from the configuration file,
+			# so that we can be sure that we're showing relevant info.
+
+			# Can has cookie?
+			cookieauth=$(grep '^[[:space:]]*CookieAuthentication[[:space:]]\+1[[:space:]]*$' "${configfile}")
+			if [ -z "${cookieauth}" ]; then
+				echo " CookieAuthentication failed."
+				echo "  Enable CookieAuthentication in ${configfile} for more detailed information."
+			else
+				authcookie=$(grep '^[[:space:]]*CookieAuthFile[[:space:]]' ${configfile})
+				[ -z "${authcookie}" ] && authcookie="${DataDirectory}/control_auth_cookie"
+				if [ ! -r "${authcookie}" ]; then
+					echo " CookieAuthentication failed."
+					echo "  CookieAuthFile not found or unreadable (file or directory permissions?)."
+					echo "  Correct this for more detailed information."
+				else
+					# Tor control protocol:
+					#   https://gitlab.torproject.org/tpo/core/torspec/-/blob/main/control-spec.txt
+
+					# Get hexadecimal representation of authorization cookie.
+					auth=$(hexdump -ve '/1 "%02x"' "${authcookie}")
+
+					[ "${daily_status_torrelay_ports}" = "YES" ] && {
+
+						# SOCKSPort.
+						socksport=$( (nc ${controladdr} ${controlport} <<-EOM
+							authenticate ${auth}
+							getinfo net/listeners/socks
+							quit
+							EOM
+							) | grep '^250-')
+						socksport=${socksport#*\"}
+						socksport=${socksport%\"*}
+						output "SOCKS port" "${socksport}"
+
+						# ORPort.
+						orport=$( (nc ${controladdr} ${controlport} <<-EOM
+							authenticate ${auth}
+							getinfo net/listeners/or
+							quit
+							EOM
+							) | grep '^250-')
+						orport=${orport#*\"}
+						orport=${orport%\"*}
+						output "OR port" "${orport}"
+
+						# DirPort.
+						dirport=$( (nc ${controladdr} ${controlport} <<-EOM
+							authenticate ${auth}
+							getinfo net/listeners/dir
+							quit
+							EOM
+							) | grep '^250-')
+						dirport=${dirport#*\"}
+						dirport=${dirport%\"*}
+						output "Dir port" "${dirport}"
+
+					}
+
+					# Flags.
+					flags=$( (nc ${controladdr} ${controlport} <<-EOM
+						authenticate ${auth}
+						getinfo ns/id/${fingerprint}
+						quit
+						EOM
+						) | grep '^s ')
+					output "Flags" "${flags##s }"
+				fi
+			fi
+		fi
+
+		###FIXME
+		# Be more elaborate here.
+		# Exit value should be 2 if something went wrong.
+		# See also periodic(8).
+		rc=1
+		;;
+	*)
+		rc=0
+		;;
+esac
+
+exit ${rc}

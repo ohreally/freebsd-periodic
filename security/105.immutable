@@ -1,0 +1,109 @@
+#!/bin/sh
+
+# $Id: 105.immutable 838 2021-11-05 09:11:17Z rob $
+
+########################################################################
+
+# List changes in immutable files and directories.
+
+# Installation:
+# - Copy this script to /usr/local/etc/periodic/security/105.immutable
+# - Make it executable
+
+# The execution of this script is disabled per default.
+# To enable, set the following in /etc/periodic.conf:
+#
+#   security_status_immutable_enable="YES"
+
+# On the first run, this script will complain with the following message:
+#
+#   No /var/log/immutable.today
+#
+# This is expected behaviour, and may be ignored.
+# It is advised to execute this script manually for the first run, to
+# assure that the first automatic run gives results that are
+# representable for the system.
+
+# After the first run you should make sure that all files and
+# directories listed in /var/log/immutable.today should indeed have the
+# immutable flag set.
+# Each subsequent run will only display changes with respect to the
+# previous run.
+
+# For more information about the immutable (and other) flags, see
+#   https://www.freebsd.org/cgi/man.cgi?query=chflags
+#   https://en.wikipedia.org/wiki/File_attribute
+
+# To learn more about `periodic', see periodic(8) and periodic.conf(5).
+
+########################################################################
+
+# Copyright (c) 2021 Rob LA LAU <rob@ohreally.nl>
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met:
+#
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the
+#    distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
+
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+########################################################################
+
+# Source global configuration.
+[ -r /etc/defaults/periodic.conf ] && {
+	. /etc/defaults/periodic.conf
+	source_periodic_confs
+}
+
+# Source functions.
+. /etc/periodic/security/security.functions
+
+case "${security_status_immutable_enable}" in
+	[Yy][Ee][Ss])
+		echo
+
+		IFS=$'\n'
+		mountpoints=$(mount -t ufs,zfs | awk '{print $3}')
+
+		# Find files and directories with the schg and uchg
+		# flags set, and compare that list to yesterday's list.
+		# This will automatically save today's list as
+		# /var/log/immutable.today, while moving yesterday's
+		# list to /var/log/immutable.yesterday.
+		# The /dev/null in the command below assures that the
+		# script doesn't crash if the `mount' command above
+		# returns an empty list.
+		find -sx ${mountpoints} /dev/null \( -flags +schg -or -flags +uchg \) -exec ls -dloT \{\} \+ \
+		  | check_diff immutable - "Files and directories with schg and uchg (immutable flag) changes:"
+
+		# Exit with the check_diff() exit value.
+		rc=$?
+		;;
+	*)
+		rc=0
+		;;
+esac
+
+exit ${rc}
