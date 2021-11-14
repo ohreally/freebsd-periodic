@@ -11,6 +11,20 @@ See [periodic(8)](https://www.freebsd.org/cgi/man.cgi?query=periodic&apropos=0&s
 
 The advantage of using the *periodic* system over cron jobs for checks and status reports, is that *periodic* collects the output for all scripts in a single email (or log file), whereas running separate cron jobs for the same scripts would result in a separate mail for each script.
 
+## `/usr/local/etc/periodic/daily/250.listports`
+
+List all ports on which a process is listening.
+
+Output includes
+
+- the IP address that the process is bound to
+- the port
+- the IP version (IPv4 or IPv6)
+- the transport protocol (TCP or UDP)
+- the name of the process
+
+Note that if a process is listening on a port, this does not automatically mean that the port is reachable. Reachability also depends on connectivity, routing, firewall configuration, et cetera. To make sure the port is reachable, you should try and connect to it from an external server.
+
 ## `/usr/local/etc/periodic/daily/435.status-memory`
 
 Displays the amount of memory and swap in use and free.

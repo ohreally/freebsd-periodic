@@ -7,7 +7,7 @@
 # List changes in immutable files and directories.
 
 # Installation:
-# - Copy this script to /usr/local/etc/periodic/security/105.immutable
+# - Copy this script to /usr/local/etc/periodic/security/
 # - Make it executable
 
 # The execution of this script is disabled per default.

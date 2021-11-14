@@ -7,7 +7,7 @@
 # Display Tor relay status.
 
 # Installation:
-# - Copy this script to /usr/local/etc/periodic/daily/485.status-torrelay
+# - Copy this script to /usr/local/etc/periodic/daily/
 # - Make it executable
 
 # The execution of this script is disabled per default.

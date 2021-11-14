@@ -1,0 +1,169 @@
+#!/bin/sh
+
+# $Id: 250.listports 846 2021-11-14 12:35:08Z rob $
+
+########################################################################
+
+# List listening ports, including the process that owns them.
+
+# Installation:
+# - Copy this script to /usr/local/etc/periodic/daily/
+# - Make it executable
+
+# The execution of this script is disabled per default.
+# To enable, set the following in /etc/periodic.conf:
+#
+#   daily_listports_enable="YES"
+#
+# You can ignore ports by setting the following variables to a comma
+# or space separated list of port numbers, e.g.:
+#
+#   daily_listports_ignore_tcp="1,22,65535"
+#   daily_listports_ignore_udp="67,68.69"
+#
+# Note that /etc/periodic.conf is sourced as a /bin/sh shell script,
+# so you can do fancy stuff. Some examples:
+#
+# To exclude a range of ports (e.g. ports 1024-1074 UDP), you could set
+#
+#   daily_listports_ignore_udp=$(seq -s ',' 1024 1074)
+#
+# To exclude the TCP ports that are monitored by the
+# security/portsentry package, you could set
+#
+#   daily_listports_ignore_tcp=$(grep '^TCP_PORTS=' /usr/local/etc/portsentry.conf | cut -d = -f 2)
+#
+# To display the list of ignored ports (without owning process), set
+#
+#   daily_listports_list_ignored="YES"
+#
+# This may sound counter-intuitive, but it allows to keep the initial
+# list short, while still being able to verify the list of ignored
+# ports without having to open the script in an editor or a pager.
+
+# To learn more about `periodic', see periodic(8) and periodic.conf(5).
+
+########################################################################
+
+# Copyright (c) 2021 Rob LA LAU <rob@ohreally.nl>
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met:
+#
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the
+#    distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
+
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+########################################################################
+
+# Source global configuration.
+[ -r /etc/defaults/periodic.conf ] && {
+	. /etc/defaults/periodic.conf
+	source_periodic_confs
+}
+
+# This turns the list of exceptions into a string
+# with each port number surrounded by hash signs.
+# This facilitates grepping later on.
+daily_listports_ignore_tcp="#$(echo "${daily_listports_ignore_tcp}" | sed -E 's/[^[:digit:]]/#/g')#"
+daily_listports_ignore_udp="#$(echo "${daily_listports_ignore_udp}" | sed -E 's/[^[:digit:]]/#/g')#"
+
+# Whether or not to list the ignored ports.
+: ${daily_listports_list_ignored:=NO}
+daily_listports_list_ignored=$(echo "${daily_listports_list_ignored}" | tr '[:lower:]' '[:upper:]')
+
+# This function pretty-prints the information.
+output() {
+	printf " %-15s  %-5s  %-5s  %-7s %s\n" "${1## }" "${2## }" "${3## }" "${4## }" "${5## }"
+}
+
+# This function receives the sorted and dissected results from sockstat.
+listport() {
+	while read line; do
+		# Each line consists of 3 fields.
+		pid=$(echo "${line}" | cut -w -f 1)
+		proto=$(echo "${line}" | cut -w -f 2)
+		address=$(echo "${line}" | cut -w -f 3)
+
+		# Split the protocol into IPv4/IPv6 and tcp/udp.
+		version="IPv${proto##[tu][cd]p}"
+		proto=${proto%%[46]}
+
+		# Split the address into IP address and port number.
+		ip=$(echo "${address}" | cut -d : -f 1)
+		port=$(echo "${address}" | cut -d : -f 2)
+
+		# Ignore the listed ports.
+		###FIXME
+		# This could be prettier.
+		# All that changes is the protocol,
+		# so maybe something with `eval', to mimic variable variables.
+		if [ "${proto}" = "tcp" ]; then
+			grep=$(echo "${daily_listports_ignore_tcp}" | fgrep "#${port}#")
+			[ -n "${grep}" ] && continue
+		else
+			grep=$(echo "${daily_listports_ignore_udp}" | fgrep "#${port}#")
+			[ -n "${grep}" ] && continue
+		fi
+
+		# And output the result.
+		output "${ip}" "${port}" "${proto}" "${version}" "$(procstat -h argument ${pid} | cut -w -f 3)"
+	done
+}
+
+case "${daily_status_torrelay_enable}" in
+	[Yy][Ee][Ss])
+		echo
+		echo "Listening ports:"
+
+		output "IP ADDRESS"      "PORT"  "PROTO" "VERSION" "COMMAND"
+		output "---------------" "-----" "-----" "-------" "-------"
+
+		###FIXME
+		# Better sorting would be nice.
+		# (But then I wouldn't have this pretty oneliner anymore...)
+		sockstat -L -l -P tcp,udp -q | cut -w -f 3,5,6 | uniq | sort -k 3 -k 2 | listport
+
+		[ "${daily_listports_list_ignored}" = "YES" ] && {
+			echo
+
+			# Output a space separated list, to allow
+			# email clients to break lines where they want.
+			echo " Ignored TCP ports:"
+			echo ${daily_listports_ignore_tcp} | sed 's/#/ /g'
+			echo " Ignored UDP ports:"
+			echo ${daily_listports_ignore_udp} | sed 's/#/ /g'
+		}
+
+		###FIXME
+		# Error reporting should be better.
+		rc=1
+		;;
+	*)
+		rc=0
+		;;
+esac
+
+exit ${rc}

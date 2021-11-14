@@ -12,7 +12,7 @@
 # CPU and ACPI temperature.
 
 # Installation:
-# - Copy this script to /usr/local/etc/periodic/daily/436.status-temperature
+# - Copy this script to /usr/local/etc/periodic/daily/
 # - Make it executable
 
 # The execution of this script is disabled per default.

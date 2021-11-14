@@ -9,7 +9,7 @@
 # This script needs the sysutils/freecolor package to be installed.
 
 # Installation:
-# - Copy this script to /usr/local/etc/periodic/daily/435.status-memory
+# - Copy this script to /usr/local/etc/periodic/daily/
 # - Make it executable
 
 # The execution of this script is disabled per default.
