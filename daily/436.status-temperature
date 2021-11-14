@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# $Id: 436.status-temperature 837 2021-11-05 09:11:00Z rob $
+# $Id: 436.status-temperature 849 2021-11-14 13:24:42Z rob $
 
 ########################################################################
 
@@ -57,6 +57,10 @@
 
 ########################################################################
 
+###TODO
+# It would be rather trivial to convert the temperatures from
+# Celsius to Fahrenheit. But how relevant is this?
+
 # Source global configuration.
 [ -r /etc/defaults/periodic.conf ] && {
 	. /etc/defaults/periodic.conf
@@ -68,11 +72,18 @@ case "${daily_status_temperature_enable}" in
 		echo
 		echo "System temperature:"
 
+		# This is used to determine the script's exit value.
 		retval=0
+
+		# HDD temperature is only available if
+		# sysutils/smartmontools is installed.
 		[ -x /usr/local/sbin/smartctl ] && {
+			# List all harddisks.
 			for hdd in $(sysctl -b kern.disks); do
 				dev=/dev/${hdd}
 				[ -e "${dev}" ] && {
+					# Retrieve the temperature in Celsius
+					# from the smartctl output.
 					hdtemp=$(/usr/local/sbin/smartctl -a ${dev} | grep 'Temperature_Celsius' | awk '{print $10}')
 					retval=$((retval + $?))
 					[ -n "${hdtemp}" ] && {
@@ -81,11 +92,20 @@ case "${daily_status_temperature_enable}" in
 				}
 			done
 		}
+
+		# Get the temperature for all CPU cores from the kernel.
 		for i in $(seq 0 $(($(sysctl -n hw.ncpu) - 1))); do
 			sysctl dev.cpu.${i}.temperature
 			retval=$((retval + $?))
 		done
+
+		# If the system supports cooling and heat management,
+		# display the temperature for all thermal zones.
+		# See acpi(4).
 		sysctl hw.acpi | grep temperature
+
+		# Exit with value 1 if there were no problems,
+		# or with value 2 if there were.
 		retval=$((retval + $?))
 		if [ ${retval} -gt 0 ]; then
 			rc=2
