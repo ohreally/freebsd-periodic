@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# $Id: 436.status-temperature 849 2021-11-14 13:24:42Z rob $
+# $Id: 436.status-temperature 850 2021-11-14 13:27:58Z rob $
 
 ########################################################################
 
@@ -103,10 +103,10 @@ case "${daily_status_temperature_enable}" in
 		# display the temperature for all thermal zones.
 		# See acpi(4).
 		sysctl hw.acpi | grep temperature
+		retval=$((retval + $?))
 
 		# Exit with value 1 if there were no problems,
 		# or with value 2 if there were.
-		retval=$((retval + $?))
 		if [ ${retval} -gt 0 ]; then
 			rc=2
 		else
