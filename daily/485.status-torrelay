@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# $Id: 485.status-torrelay 844 2021-11-14 10:34:29Z rob $
+# $Id: 485.status-torrelay 845 2021-11-14 12:14:40Z rob $
 
 ########################################################################
 
@@ -72,8 +72,13 @@
 	source_periodic_confs
 }
 
+# Get or set additional vars.
 : ${daily_status_torrelay_ports:=NO}
 : ${daily_status_torrelay_starttime:=NO}
+
+# Convert user provided values to uppercase.
+daily_status_torrelay_ports=$(echo "${daily_status_torrelay_ports}" | tr '[:lower:]' '[:upper:]')
+daily_status_torrelay_starttime=$(echo "${daily_status_torrelay_starttime}" | tr '[:lower:]' '[:upper:]')
 
 # This function receives the command line arguments
 # as listed by `procstat -h argument ${pid}'.
