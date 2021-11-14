@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# $Id: 250.listports 846 2021-11-14 12:35:08Z rob $
+# $Id: 250.listports 848 2021-11-14 12:58:53Z rob $
 
 ########################################################################
 
@@ -133,7 +133,7 @@ listport() {
 	done
 }
 
-case "${daily_status_torrelay_enable}" in
+case "${daily_listports_enable}" in
 	[Yy][Ee][Ss])
 		echo
 		echo "Listening ports:"
