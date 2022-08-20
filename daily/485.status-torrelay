@@ -60,6 +60,11 @@
 
 ########################################################################
 
+# Please report any issues at
+#   https://gitlab.torproject.org/ohreally/freebsd-periodic
+# or
+#   https://github.com/ohreally/freebsd-periodic
+
 ###TODO
 # - heartbeat-like messages
 #   see /var/log/tor/notices.log
